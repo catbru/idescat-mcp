@@ -109,6 +109,71 @@ export interface HistoricalRelations {
   grouped: Array<{ href: string; label: string }>;
 }
 
+// ─── fetchIdescat ─────────────────────────────────────────────────────────────
+
+export class IdescatError extends Error {
+  constructor(public id: string, public apiLabel: string) {
+    super(`IDESCAT API error ${id}: ${apiLabel}`);
+  }
+}
+
+/**
+ * Fetch a URL from the IDESCAT API.
+ * - Appends lang query param (default: 'ca')
+ * - Auto-switches to POST when full URL > 2000 chars
+ * - Detects errors from HTTP status AND JSON body class
+ * @param url     Base URL (no query string for filters)
+ * @param options Optional filter params string (URL-encoded, e.g. "SEX=F&COM=01")
+ * @param lang    Language (default: 'ca')
+ */
+export async function fetchIdescat(
+  url: string,
+  options?: { params?: string },
+  lang: string = DEFAULT_LANG
+): Promise<JsonStatDataset | JsonStatCollection> {
+  const langParam = `lang=${encodeURIComponent(lang)}`;
+  const filterParams = options?.params ?? '';
+
+  // Build the candidate GET URL to measure length
+  const separator = url.includes('?') ? '&' : '?';
+  const candidateUrl = filterParams
+    ? `${url}${separator}${filterParams}&${langParam}`
+    : `${url}${separator}${langParam}`;
+
+  let response: Response;
+  try {
+    if (candidateUrl.length > POST_URL_THRESHOLD && filterParams) {
+      // Use POST: lang in query string, filters in body
+      const postUrl = `${url}${separator}${langParam}`;
+      response = await fetch(postUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: filterParams,
+      });
+    } else {
+      response = await fetch(candidateUrl);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`No s'ha pogut connectar amb l'API d'IDESCAT: ${msg}`);
+  }
+
+  const data = await response.json() as JsonStatDataset | JsonStatCollection | IdescatApiError;
+
+  // Check JSON body class first (covers 2xx-with-error-body edge case)
+  if ((data as IdescatApiError).class === 'error') {
+    const e = data as IdescatApiError;
+    throw new IdescatError(e.id, e.label);
+  }
+
+  if (!response.ok) {
+    // Non-2xx without a recognized error body
+    throw new IdescatError('00', `HTTP ${response.status}`);
+  }
+
+  return data as JsonStatDataset | JsonStatCollection;
+}
+
 // ─── flattenJsonStat ──────────────────────────────────────────────────────────
 
 /** Normalize a sparse-object or dense-array value/status field to a dense array. */
