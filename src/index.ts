@@ -302,10 +302,9 @@ export async function handleQueryData(args: {
         const meta = await fetchIdescat(metaUrl, undefined, lang) as JsonStatDataset;
         const dimHints = meta.id.map((dimId) => {
           const cat = meta.dimension[dimId].category;
-          const codes = Array.isArray(cat.index)
-            ? cat.index.slice(0, 10).join(', ')
-            : Object.keys(cat.index).slice(0, 10).join(', ');
-          return `  - ${dimId}: ${codes}${Object.keys(cat.index).length > 10 ? ', ...' : ''}`;
+          const allCodes = Array.isArray(cat.index) ? cat.index : Object.keys(cat.index);
+          const codes = allCodes.slice(0, 10).join(', ');
+          return `  - ${dimId}: ${codes}${allCodes.length > 10 ? ', ...' : ''}`;
         });
         hint = `\n\nDimensions disponibles per filtrar:\n${dimHints.join('\n')}`;
       } catch {
