@@ -144,23 +144,32 @@ export async function fetchIdescat(
     ? `${url}${separator}${filterParams}&${langParam}`
     : `${url}${separator}${langParam}`;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30_000);
+
   let response: Response;
   try {
     if (candidateUrl.length > POST_URL_THRESHOLD && filterParams) {
-      // Use POST: lang in query string, filters in body
       const postUrl = `${url}${separator}${langParam}`;
       response = await fetch(postUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: filterParams,
+        signal: controller.signal,
       });
     } else {
-      response = await fetch(candidateUrl);
+      response = await fetch(candidateUrl, { signal: controller.signal });
     }
   } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error("No s'ha pogut connectar amb l'API d'IDESCAT: timeout de 30 segons superat");
+    }
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`No s'ha pogut connectar amb l'API d'IDESCAT: ${msg}`);
   }
+
+  clearTimeout(timeoutId);
 
   let data: JsonStatDataset | JsonStatCollection | IdescatApiError;
   try {
@@ -223,7 +232,7 @@ export async function handleGetTerritorialOptions(args: {
   return data.link.item.map((item) => ({
     id: item.id ?? item.href?.split('/').pop() ?? item.label,
     label: item.label,
-    href: item.href ?? `${url}/${item.id}`,
+    href: item.href ?? (item.id ? `${url}/${item.id}` : url),
   }));
 }
 
@@ -237,7 +246,9 @@ export async function handleGetTableMetadata(args: {
 }): Promise<TableMetadata> {
   const { statistics, node, table, geo, filters, lang = DEFAULT_LANG } = args;
   const url = `${BASE_URL}/${statistics}/${node}/${table}/${geo}`;
-  const params = filters ? new URLSearchParams(filters).toString() : undefined;
+  const params = filters
+    ? Object.entries(filters).map(([k, v]) => `${encodeURIComponent(k)}=${v}`).join('&')
+    : undefined;
   const data = await fetchIdescat(url, params ? { params } : undefined, lang) as JsonStatDataset;
 
   const dimensions: DimensionMeta[] = data.id.map((dimId) => {
@@ -287,7 +298,7 @@ export async function handleQueryData(args: {
   const paramParts: string[] = [];
   if (filters) {
     for (const [k, v] of Object.entries(filters)) {
-      paramParts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
+      paramParts.push(`${encodeURIComponent(k)}=${v}`);
     }
   }
   if (last !== undefined) paramParts.push(`_LAST_=${last}`);
