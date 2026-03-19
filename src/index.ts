@@ -1,4 +1,7 @@
 import { fileURLToPath } from 'node:url';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -425,4 +428,129 @@ export function flattenJsonStat(dataset: JsonStatDataset): FlatRow[] {
   }
 
   return rows;
+}
+
+// ─── MCP Server ───────────────────────────────────────────────────────────────
+
+const server = new Server(
+  { name: 'idescat-mcp', version: '1.0.0' },
+  { capabilities: { tools: {} } }
+);
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: 'idescat_list_catalog',
+      description: "Navega el catàleg de l'IDESCAT: llista estadístiques, nodes o taules. Crida sense paràmetres per veure totes les estadístiques disponibles.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          statistics: { type: 'string', description: "Codi de l'estadística (ex: pmh). Opcional." },
+          node: { type: 'string', description: 'Codi del node (requereix statistics). Opcional.' },
+          lang: { type: 'string', description: 'Idioma: ca (defecte), es, en.' },
+        },
+      },
+    },
+    {
+      name: 'idescat_get_territorial_options',
+      description: 'Retorna les divisions territorials disponibles per a una taula específica (cat, com, mun, prov, etc.).',
+      inputSchema: {
+        type: 'object',
+        required: ['statistics', 'node', 'table'],
+        properties: {
+          statistics: { type: 'string' },
+          node: { type: 'string' },
+          table: { type: 'string' },
+          lang: { type: 'string', description: 'Idioma: ca (defecte), es, en.' },
+        },
+      },
+    },
+    {
+      name: 'idescat_get_table_metadata',
+      description: "Retorna les metadades d'una taula: dimensions, valors possibles, fonts i enllaç a les dades. Usa-la ABANS de idescat_query_data per saber quins filtres aplicar.",
+      inputSchema: {
+        type: 'object',
+        required: ['statistics', 'node', 'table', 'geo'],
+        properties: {
+          statistics: { type: 'string' },
+          node: { type: 'string' },
+          table: { type: 'string' },
+          geo: { type: 'string', description: 'Divisió territorial (cat, com, mun, prov, etc.).' },
+          filters: { type: 'object', description: 'Filtres opcionals. Ex: {"SEX": "F"}', additionalProperties: { type: 'string' } },
+          lang: { type: 'string', description: 'Idioma: ca (defecte), es, en.' },
+        },
+      },
+    },
+    {
+      name: 'idescat_query_data',
+      description: "Obté dades d'una taula com a array de files aplanades amb etiquetes. Consulta primer idescat_get_table_metadata per saber les dimensions i filtres disponibles.",
+      inputSchema: {
+        type: 'object',
+        required: ['statistics', 'node', 'table', 'geo'],
+        properties: {
+          statistics: { type: 'string' },
+          node: { type: 'string' },
+          table: { type: 'string' },
+          geo: { type: 'string' },
+          filters: { type: 'object', description: 'Filtres per dimensió. Ex: {"SEX": "F", "COM": "01,TOTAL"}', additionalProperties: { type: 'string' } },
+          last: { type: 'number', description: 'Retorna els darrers N períodes disponibles (_LAST_). No combinar amb filtre de temps.' },
+          lang: { type: 'string', description: 'Idioma: ca (defecte), es, en.' },
+        },
+      },
+    },
+    {
+      name: 'idescat_check_historical_relations',
+      description: 'Descobreix taules relacionades: versions anteriors de la mateixa sèrie i les mateixes dades en altres divisions territorials.',
+      inputSchema: {
+        type: 'object',
+        required: ['statistics', 'node', 'table', 'geo'],
+        properties: {
+          statistics: { type: 'string' },
+          node: { type: 'string' },
+          table: { type: 'string' },
+          geo: { type: 'string' },
+          lang: { type: 'string', description: 'Idioma: ca (defecte), es, en.' },
+        },
+      },
+    },
+  ],
+}));
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  const a = (args ?? {}) as Record<string, unknown>;
+
+  try {
+    let result: unknown;
+
+    if (name === 'idescat_list_catalog') {
+      result = await handleListCatalog(a as Parameters<typeof handleListCatalog>[0]);
+    } else if (name === 'idescat_get_territorial_options') {
+      result = await handleGetTerritorialOptions(a as Parameters<typeof handleGetTerritorialOptions>[0]);
+    } else if (name === 'idescat_get_table_metadata') {
+      result = await handleGetTableMetadata(a as Parameters<typeof handleGetTableMetadata>[0]);
+    } else if (name === 'idescat_query_data') {
+      result = await handleQueryData(a as Parameters<typeof handleQueryData>[0]);
+    } else if (name === 'idescat_check_historical_relations') {
+      result = await handleCheckHistoricalRelations(a as Parameters<typeof handleCheckHistoricalRelations>[0]);
+    } else {
+      return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
+    }
+
+    const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+    return { content: [{ type: 'text', text }] };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: 'text', text: msg }], isError: true };
+  }
+});
+
+export async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+// Only start server when run directly (not imported by tests)
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch(console.error);
 }
