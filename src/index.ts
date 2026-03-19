@@ -318,6 +318,45 @@ export async function handleQueryData(args: {
   return flattenJsonStat(data);
 }
 
+export async function handleCheckHistoricalRelations(args: {
+  statistics: string;
+  node: string;
+  table: string;
+  geo: string;
+  lang?: string;
+}): Promise<HistoricalRelations> {
+  const { statistics, node, table, geo, lang = DEFAULT_LANG } = args;
+  const url = `${BASE_URL}/${statistics}/${node}/${table}/${geo}`;
+  const data = await fetchIdescat(url, undefined, lang) as JsonStatDataset;
+
+  const related = data.link?.related ?? [];
+  const result: HistoricalRelations = { other_geos: [], historical: [], grouped: [] };
+
+  for (const entry of related) {
+    const item = { href: entry.href, label: entry.label };
+    if (entry.extension?.group) {
+      result.grouped.push(item);
+      continue;
+    }
+    // Extract table segment: URL pathname is /taules/v2/{stat}/{node}/{tableId}/{geo}
+    // Split by '/' → ['', 'taules', 'v2', stat, node, tableId, geo]
+    try {
+      const pathParts = new URL(entry.href).pathname.split('/').filter(Boolean);
+      // pathParts: ['taules', 'v2', stat, node, tableId, geo]
+      const entryTableId = pathParts[4]; // index 4 = table segment
+      if (entryTableId === table) {
+        result.other_geos.push(item);
+      } else {
+        result.historical.push(item);
+      }
+    } catch {
+      result.historical.push(item);
+    }
+  }
+
+  return result;
+}
+
 // ─── flattenJsonStat ──────────────────────────────────────────────────────────
 
 /** Normalize a sparse-object or dense-array value/status field to a dense array. */

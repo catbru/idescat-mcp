@@ -4,6 +4,7 @@ import {
   handleGetTerritorialOptions,
   handleGetTableMetadata,
   handleQueryData,
+  handleCheckHistoricalRelations,
 } from '../src/index.js';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -209,5 +210,37 @@ describe('handleQueryData', () => {
     expect(result as string).toContain('20.000');
     expect(result as string).toContain('SEX');
     expect(result as string).toContain('YEAR');
+  });
+});
+
+// ─── handleCheckHistoricalRelations ──────────────────────────────────────────
+
+describe('handleCheckHistoricalRelations', () => {
+  it('classifies other_geos correctly (same table segment)', async () => {
+    mockFetch(metadataFixture); // related has pmh/1/2/prov (table=2 = current)
+    const result = await handleCheckHistoricalRelations({ statistics: 'pmh', node: '1', table: '2', geo: 'com' });
+    expect(result.other_geos).toHaveLength(1);
+    expect(result.other_geos[0].label).toBe('Pop. Provinces');
+  });
+
+  it('classifies historical correctly (different table segment, no group)', async () => {
+    mockFetch(metadataFixture); // related has pmh/1/99/com (table=99 ≠ 2)
+    const result = await handleCheckHistoricalRelations({ statistics: 'pmh', node: '1', table: '2', geo: 'com' });
+    expect(result.historical).toHaveLength(1);
+    expect(result.historical[0].label).toContain('hist');
+  });
+
+  it('classifies grouped correctly (extension.group === true)', async () => {
+    mockFetch(metadataFixture); // related has pmh/1/2/mun with extension.group=true
+    const result = await handleCheckHistoricalRelations({ statistics: 'pmh', node: '1', table: '2', geo: 'com' });
+    expect(result.grouped).toHaveLength(1);
+    expect(result.grouped[0].label).toContain('Municipis');
+  });
+
+  it('returns empty arrays when no related links', async () => {
+    const noRelated = { ...metadataFixture, link: { describes: metadataFixture.link.describes } };
+    mockFetch(noRelated);
+    const result = await handleCheckHistoricalRelations({ statistics: 'pmh', node: '1', table: '2', geo: 'com' });
+    expect(result).toEqual({ other_geos: [], historical: [], grouped: [] });
   });
 });
