@@ -180,6 +180,94 @@ export async function fetchIdescat(
   return data as JsonStatDataset | JsonStatCollection;
 }
 
+// ─── Helper: parse collection items ──────────────────────────────────────────
+
+function parseCollectionItems(collection: JsonStatCollection): CatalogItem[] {
+  return collection.link.item.map((item) => {
+    const entry: CatalogItem = {
+      id: item.id ?? item.href?.split('/').pop() ?? item.label,
+      label: item.label,
+    };
+    if (item.href) entry.href = item.href;
+    return entry;
+  });
+}
+
+// ─── Tool handlers ────────────────────────────────────────────────────────────
+
+export async function handleListCatalog(args: {
+  statistics?: string;
+  node?: string;
+  lang?: string;
+}): Promise<CatalogItem[]> {
+  const { statistics, node, lang = DEFAULT_LANG } = args;
+  let url = BASE_URL;
+  if (statistics) url += `/${statistics}`;
+  if (statistics && node) url += `/${node}`;
+  const data = await fetchIdescat(url, undefined, lang) as JsonStatCollection;
+  return parseCollectionItems(data);
+}
+
+export async function handleGetTerritorialOptions(args: {
+  statistics: string;
+  node: string;
+  table: string;
+  lang?: string;
+}): Promise<TerritorialOption[]> {
+  const { statistics, node, table, lang = DEFAULT_LANG } = args;
+  const url = `${BASE_URL}/${statistics}/${node}/${table}`;
+  const data = await fetchIdescat(url, undefined, lang) as JsonStatCollection;
+  return data.link.item.map((item) => ({
+    id: item.id ?? item.href?.split('/').pop() ?? item.label,
+    label: item.label,
+    href: item.href ?? `${url}/${item.id}`,
+  }));
+}
+
+export async function handleGetTableMetadata(args: {
+  statistics: string;
+  node: string;
+  table: string;
+  geo: string;
+  filters?: Record<string, string>;
+  lang?: string;
+}): Promise<TableMetadata> {
+  const { statistics, node, table, geo, filters, lang = DEFAULT_LANG } = args;
+  const url = `${BASE_URL}/${statistics}/${node}/${table}/${geo}`;
+  const params = filters ? new URLSearchParams(filters).toString() : undefined;
+  const data = await fetchIdescat(url, params ? { params } : undefined, lang) as JsonStatDataset;
+
+  const dimensions: DimensionMeta[] = data.id.map((dimId) => {
+    const dim = data.dimension[dimId];
+    const cat = dim.category;
+    // Build ordered categories from index
+    const indexMap = Array.isArray(cat.index)
+      ? Object.fromEntries(cat.index.map((code, pos) => [pos, code]))
+      : Object.fromEntries(Object.entries(cat.index).map(([code, pos]) => [pos, code]));
+
+    const count = Array.isArray(cat.index) ? cat.index.length : Object.keys(cat.index).length;
+    const categories = Array.from({ length: count }, (_, pos) => {
+      const code = indexMap[pos] ?? String(pos);
+      return { id: code, label: cat.label?.[code] ?? code };
+    });
+
+    const entry: DimensionMeta = { id: dimId, label: dim.label, categories };
+    if (dim.extension?.break) entry.breaks = dim.extension.break;
+    return entry;
+  });
+
+  const result: TableMetadata = { dimensions };
+  if (data.extension?.status?.label) result.statusLegend = data.extension.status.label;
+  if (data.extension?.source) result.source = data.extension.source;
+  if (data.link?.describes?.[0]) {
+    result.describes = {
+      href: data.link.describes[0].href,
+      label: data.link.describes[0].label,
+    };
+  }
+  return result;
+}
+
 // ─── flattenJsonStat ──────────────────────────────────────────────────────────
 
 /** Normalize a sparse-object or dense-array value/status field to a dense array. */
