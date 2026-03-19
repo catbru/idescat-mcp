@@ -64,7 +64,7 @@ export interface JsonStatCollection {
 }
 
 export interface IdescatApiError {
-  version: string;
+  version?: string;
   class: 'error';
   status: string;
   id: string;
@@ -114,6 +114,7 @@ export interface HistoricalRelations {
 export class IdescatError extends Error {
   constructor(public id: string, public apiLabel: string) {
     super(`IDESCAT API error ${id}: ${apiLabel}`);
+    this.name = 'IdescatError';
   }
 }
 
@@ -158,7 +159,12 @@ export async function fetchIdescat(
     throw new Error(`No s'ha pogut connectar amb l'API d'IDESCAT: ${msg}`);
   }
 
-  const data = await response.json() as JsonStatDataset | JsonStatCollection | IdescatApiError;
+  let data: JsonStatDataset | JsonStatCollection | IdescatApiError;
+  try {
+    data = await response.json() as JsonStatDataset | JsonStatCollection | IdescatApiError;
+  } catch {
+    throw new IdescatError('00', `Resposta no vàlida de l'API (HTTP ${response.status})`);
+  }
 
   // Check JSON body class first (covers 2xx-with-error-body edge case)
   if ((data as IdescatApiError).class === 'error') {
