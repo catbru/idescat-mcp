@@ -268,6 +268,57 @@ export async function handleGetTableMetadata(args: {
   return result;
 }
 
+export async function handleQueryData(args: {
+  statistics: string;
+  node: string;
+  table: string;
+  geo: string;
+  filters?: Record<string, string>;
+  last?: number;
+  lang?: string;
+}): Promise<FlatRow[] | string> {
+  const { statistics, node, table, geo, filters, last, lang = DEFAULT_LANG } = args;
+  const url = `${BASE_URL}/${statistics}/${node}/${table}/${geo}/data`;
+
+  // Build filter params string
+  const paramParts: string[] = [];
+  if (filters) {
+    for (const [k, v] of Object.entries(filters)) {
+      paramParts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
+    }
+  }
+  if (last !== undefined) paramParts.push(`_LAST_=${last}`);
+  const params = paramParts.length > 0 ? paramParts.join('&') : undefined;
+
+  let data: JsonStatDataset;
+  try {
+    data = await fetchIdescat(url, params ? { params } : undefined, lang) as JsonStatDataset;
+  } catch (err) {
+    if (err instanceof IdescatError && err.id === '05') {
+      // Follow-up metadata call to list available dimensions
+      const metaUrl = `${BASE_URL}/${statistics}/${node}/${table}/${geo}`;
+      let hint = '';
+      try {
+        const meta = await fetchIdescat(metaUrl, undefined, lang) as JsonStatDataset;
+        const dimHints = meta.id.map((dimId) => {
+          const cat = meta.dimension[dimId].category;
+          const codes = Array.isArray(cat.index)
+            ? cat.index.slice(0, 10).join(', ')
+            : Object.keys(cat.index).slice(0, 10).join(', ');
+          return `  - ${dimId}: ${codes}${Object.keys(cat.index).length > 10 ? ', ...' : ''}`;
+        });
+        hint = `\n\nDimensions disponibles per filtrar:\n${dimHints.join('\n')}`;
+      } catch {
+        hint = '';
+      }
+      return `Límit de 20.000 dades superat. Afegeix filtres per reduir la consulta.${hint}`;
+    }
+    throw err;
+  }
+
+  return flattenJsonStat(data);
+}
+
 // ─── flattenJsonStat ──────────────────────────────────────────────────────────
 
 /** Normalize a sparse-object or dense-array value/status field to a dense array. */

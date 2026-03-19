@@ -3,6 +3,7 @@ import {
   handleListCatalog,
   handleGetTerritorialOptions,
   handleGetTableMetadata,
+  handleQueryData,
 } from '../src/index.js';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -140,5 +141,73 @@ describe('handleGetTableMetadata', () => {
     await handleGetTableMetadata({ statistics: 'pmh', node: '1', table: '2', geo: 'com', filters: { SEX: 'H' } });
     const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
     expect(calledUrl).toContain('SEX=H');
+  });
+});
+
+// ─── handleQueryData ──────────────────────────────────────────────────────────
+
+const dataFixture = {
+  version: '2.0',
+  class: 'dataset',
+  id: ['SEX', 'YEAR'],
+  size: [2, 2],
+  dimension: {
+    SEX: { label: 'Sexe', category: { index: { T: 0, H: 1 }, label: { T: 'Total', H: 'Homes' } } },
+    YEAR: { label: 'Any', category: { index: { '2022': 0, '2023': 1 }, label: { '2022': '2022', '2023': '2023' } }, role: 'time' },
+  },
+  value: [100, 200, 50, 80],
+};
+
+describe('handleQueryData', () => {
+  it('calls the data endpoint', async () => {
+    mockFetch(dataFixture);
+    await handleQueryData({ statistics: 'pmh', node: '1', table: '2', geo: 'com' });
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain('/data');
+  });
+
+  it('returns flattened rows with labels', async () => {
+    mockFetch(dataFixture);
+    const rows = await handleQueryData({ statistics: 'pmh', node: '1', table: '2', geo: 'com' });
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).toMatchObject({ SEX: 'Total', YEAR: '2022', value: 100 });
+  });
+
+  it('appends filters to URL', async () => {
+    mockFetch(dataFixture);
+    await handleQueryData({ statistics: 'pmh', node: '1', table: '2', geo: 'com', filters: { SEX: 'H' } });
+    const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+    expect(calledUrl).toContain('SEX=H');
+  });
+
+  it('appends _LAST_ when last is provided', async () => {
+    mockFetch(dataFixture);
+    await handleQueryData({ statistics: 'pmh', node: '1', table: '2', geo: 'com', last: 2 });
+    const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+    expect(calledUrl).toContain('_LAST_=2');
+  });
+
+  it('on error 05, makes metadata follow-up and returns helpful message', async () => {
+    let callCount = 0;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // First call: data endpoint → error 05
+        return Promise.resolve({
+          ok: false, status: 416,
+          json: () => Promise.resolve({ class: 'error', status: '416', id: '05', label: 'Data limit exceeded.' }),
+        });
+      }
+      // Second call: metadata endpoint
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve(metadataFixture),
+      });
+    }));
+
+    const result = await handleQueryData({ statistics: 'pmh', node: '1', table: '2', geo: 'com' });
+    expect(typeof result).toBe('string');
+    expect(result as string).toContain('20.000');
+    expect(result as string).toContain('SEX');
+    expect(result as string).toContain('YEAR');
   });
 });
