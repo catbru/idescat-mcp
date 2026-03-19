@@ -117,7 +117,10 @@ function normalizeSparse<T>(
 ): (T | null)[] {
   if (!field) return [];
   if (Array.isArray(field)) return field as (T | null)[];
-  const arr: (T | null)[] = [];
+  const keys = Object.keys(field).map(Number);
+  if (keys.length === 0) return [];
+  const maxIndex = Math.max(...keys);
+  const arr: (T | null)[] = new Array(maxIndex + 1).fill(null);
   for (const [k, v] of Object.entries(field)) {
     arr[Number(k)] = v;
   }
