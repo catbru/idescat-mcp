@@ -495,8 +495,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description: 'Retorna les divisions territorials disponibles per a una taula específica (cat, com, mun, prov, etc.).',
       inputSchema: {
         type: 'object',
-        required: ['statistics', 'node', 'table'],
         properties: {
+          table_id: { type: 'string', description: 'Camí complet "statistics/node/table" (alternativa als camps separats).' },
           statistics: { type: 'string' },
           node: { type: 'string' },
           table: { type: 'string' },
@@ -509,8 +509,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description: "Retorna les metadades d'una taula: dimensions, valors possibles, fonts i enllaç a les dades. IMPORTANT: l'ID de taula (table) és diferent de l'ID de node — obté'l primer amb idescat_list_catalog(statistics, node). Usa-la ABANS de idescat_query_data per saber quins filtres aplicar.",
       inputSchema: {
         type: 'object',
-        required: ['statistics', 'node', 'table', 'geo'],
         properties: {
+          table_id: { type: 'string', description: 'Camí complet "statistics/node/table/geo" (alternativa als camps separats).' },
           statistics: { type: 'string' },
           node: { type: 'string' },
           table: { type: 'string' },
@@ -525,8 +525,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description: "Obté dades d'una taula com a array de files aplanades amb etiquetes. IMPORTANT: l'ID de taula (table) és diferent de l'ID de node — obté'l amb idescat_list_catalog(statistics, node). Consulta primer idescat_get_table_metadata per saber les dimensions i filtres disponibles.",
       inputSchema: {
         type: 'object',
-        required: ['statistics', 'node', 'table', 'geo'],
         properties: {
+          table_id: { type: 'string', description: 'Camí complet "statistics/node/table/geo" (alternativa als camps separats).' },
           statistics: { type: 'string' },
           node: { type: 'string' },
           table: { type: 'string' },
@@ -542,8 +542,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description: 'Descobreix taules relacionades: versions anteriors de la mateixa sèrie i les mateixes dades en altres divisions territorials.',
       inputSchema: {
         type: 'object',
-        required: ['statistics', 'node', 'table', 'geo'],
         properties: {
+          table_id: { type: 'string', description: 'Camí complet "statistics/node/table/geo" (alternativa als camps separats).' },
           statistics: { type: 'string' },
           node: { type: 'string' },
           table: { type: 'string' },
@@ -558,6 +558,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   const a = (args ?? {}) as Record<string, unknown>;
+
+  // Allow table_id shorthand: "statistics/node/table/geo" → separate fields
+  if (typeof a.table_id === 'string') {
+    const parts = (a.table_id as string).split('/').filter(Boolean);
+    if (!a.statistics && parts[0]) a.statistics = parts[0];
+    if (!a.node      && parts[1]) a.node      = parts[1];
+    if (!a.table     && parts[2]) a.table     = parts[2];
+    if (!a.geo       && parts[3]) a.geo       = parts[3];
+  }
 
   try {
     let result: unknown;
