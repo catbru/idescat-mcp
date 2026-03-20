@@ -143,6 +143,31 @@ describe('handleGetTableMetadata', () => {
     const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
     expect(calledUrl).toContain('SEX=H');
   });
+
+  it('on error 03, makes catalog follow-up and returns helpful message with table list', async () => {
+    let callCount = 0;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: false, status: 400,
+          json: () => Promise.resolve({ class: 'error', status: '400', id: '03', label: 'Identificador de taula incorrecte.' }),
+        });
+      }
+      // Second call: catalog listing for node
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve(collectionFixture),
+      });
+    }));
+
+    const result = await handleGetTableMetadata({ statistics: 'pmh', node: '1', table: '1', geo: 'com' });
+    expect(typeof result).toBe('string');
+    expect(result as string).toContain('Identificador de taula incorrecte');
+    expect(result as string).toContain('"1"');
+    expect(result as string).toContain('idescat_list_catalog');
+    expect(result as string).toContain('pmh');
+  });
 });
 
 // ─── handleQueryData ──────────────────────────────────────────────────────────
@@ -210,6 +235,29 @@ describe('handleQueryData', () => {
     expect(result as string).toContain('20.000');
     expect(result as string).toContain('SEX');
     expect(result as string).toContain('YEAR');
+  });
+
+  it('on error 03, makes catalog follow-up and returns helpful message with table list', async () => {
+    let callCount = 0;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: false, status: 400,
+          json: () => Promise.resolve({ class: 'error', status: '400', id: '03', label: 'Identificador de taula incorrecte.' }),
+        });
+      }
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve(collectionFixture),
+      });
+    }));
+
+    const result = await handleQueryData({ statistics: 'pmh', node: '1', table: '1', geo: 'com' });
+    expect(typeof result).toBe('string');
+    expect(result as string).toContain('Identificador de taula incorrecte');
+    expect(result as string).toContain('idescat_list_catalog');
+    expect(result as string).toContain('pmh');
   });
 });
 

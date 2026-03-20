@@ -243,13 +243,30 @@ export async function handleGetTableMetadata(args: {
   geo: string;
   filters?: Record<string, string>;
   lang?: string;
-}): Promise<TableMetadata> {
+}): Promise<TableMetadata | string> {
   const { statistics, node, table, geo, filters, lang = DEFAULT_LANG } = args;
   const url = `${BASE_URL}/${statistics}/${node}/${table}/${geo}`;
   const params = filters
     ? Object.entries(filters).map(([k, v]) => `${encodeURIComponent(k)}=${v}`).join('&')
     : undefined;
-  const data = await fetchIdescat(url, params ? { params } : undefined, lang) as JsonStatDataset;
+  let data: JsonStatDataset;
+  try {
+    data = await fetchIdescat(url, params ? { params } : undefined, lang) as JsonStatDataset;
+  } catch (err) {
+    if (err instanceof IdescatError && err.id === '03') {
+      // The table ID is wrong — list available tables under this node to help the agent
+      let hint = '';
+      try {
+        const tables = await handleListCatalog({ statistics, node, lang });
+        const lines = tables.map(t => `  - id: "${t.id}", label: "${t.label}"`).join('\n');
+        hint = `\n\nTaules disponibles sota el node "${node}" de l'estadística "${statistics}":\n${lines}`;
+      } catch {
+        hint = '';
+      }
+      return `Identificador de taula incorrecte: "${table}". Usa idescat_list_catalog amb statistics="${statistics}" i node="${node}" per obtenir els IDs de taula vàlids.${hint}`;
+    }
+    throw err;
+  }
 
   const dimensions: DimensionMeta[] = data.id.map((dimId) => {
     const dim = data.dimension[dimId];
@@ -308,6 +325,17 @@ export async function handleQueryData(args: {
   try {
     data = await fetchIdescat(url, params ? { params } : undefined, lang) as JsonStatDataset;
   } catch (err) {
+    if (err instanceof IdescatError && err.id === '03') {
+      let hint = '';
+      try {
+        const tables = await handleListCatalog({ statistics, node, lang });
+        const lines = tables.map(t => `  - id: "${t.id}", label: "${t.label}"`).join('\n');
+        hint = `\n\nTaules disponibles sota el node "${node}" de l'estadística "${statistics}":\n${lines}`;
+      } catch {
+        hint = '';
+      }
+      return `Identificador de taula incorrecte: "${table}". Usa idescat_list_catalog amb statistics="${statistics}" i node="${node}" per obtenir els IDs de taula vàlids.${hint}`;
+    }
     if (err instanceof IdescatError && err.id === '05') {
       // Follow-up metadata call to list available dimensions
       const metaUrl = `${BASE_URL}/${statistics}/${node}/${table}/${geo}`;
@@ -452,7 +480,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'idescat_list_catalog',
-      description: "Navega el catàleg de l'IDESCAT: llista estadístiques, nodes o taules. Crida sense paràmetres per veure totes les estadístiques disponibles.",
+      description: "Navega el catàleg jeràrquic de l'IDESCAT en 3 nivells: (1) sense paràmetres → llista d'estadístiques; (2) amb statistics → llista de nodes; (3) amb statistics+node → llista de TAULES amb els seus IDs reals. Has de cridar-la fins al nivell 3 per obtenir l'ID de taula correcte abans d'usar idescat_get_table_metadata o idescat_query_data.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -478,7 +506,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'idescat_get_table_metadata',
-      description: "Retorna les metadades d'una taula: dimensions, valors possibles, fonts i enllaç a les dades. Usa-la ABANS de idescat_query_data per saber quins filtres aplicar.",
+      description: "Retorna les metadades d'una taula: dimensions, valors possibles, fonts i enllaç a les dades. IMPORTANT: l'ID de taula (table) és diferent de l'ID de node — obté'l primer amb idescat_list_catalog(statistics, node). Usa-la ABANS de idescat_query_data per saber quins filtres aplicar.",
       inputSchema: {
         type: 'object',
         required: ['statistics', 'node', 'table', 'geo'],
@@ -494,7 +522,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'idescat_query_data',
-      description: "Obté dades d'una taula com a array de files aplanades amb etiquetes. Consulta primer idescat_get_table_metadata per saber les dimensions i filtres disponibles.",
+      description: "Obté dades d'una taula com a array de files aplanades amb etiquetes. IMPORTANT: l'ID de taula (table) és diferent de l'ID de node — obté'l amb idescat_list_catalog(statistics, node). Consulta primer idescat_get_table_metadata per saber les dimensions i filtres disponibles.",
       inputSchema: {
         type: 'object',
         required: ['statistics', 'node', 'table', 'geo'],
